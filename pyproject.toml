@@ -1,0 +1,29 @@
+# 本项目依赖统一由 requirements.txt / requirements-dev.txt 管理，
+# 这里只放工具链配置（pytest / ruff / pyright），不声明 [project]，避免两套依赖来源冲突。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # FastAPI 依赖注入惯用 Depends(...) 作为默认值
+
+[tool.pyright]
+# 与 VS Code 的 Pylance 同一套规则，命令行核对：python -m pyright
+# 用 standard 而不是 strict：LangChain / LangGraph 存在大量动态类型，strict 会产生噪音
+typeCheckingMode = "standard"
+pythonVersion = "3.10"          # 与 ruff 的 target-version 对齐
+include = ["app", "scripts", "frontend", "tests"]
+exclude = [".venv", "data", "**/__pycache__"]
+venvPath = "."
+venv = ".venv"

@@ -1,0 +1,15 @@
+# ============================================================
+# AI 研发助手 Agent —— 开发/测试依赖
+# 安装：python -m pip install -r requirements-dev.txt
+# ============================================================
+
+-r requirements.txt
+
+pytest==9.1.1        # 单元测试框架（测试用 asyncio.run 驱动协程，未额外引入 pytest-asyncio）
+httpx==0.28.1        # fastapi.testclient.TestClient 的底层 HTTP 客户端
+
+# ---------- 静态检查（配置见 pyproject.toml 的 [tool.ruff] / [tool.pyright]） ----------
+ruff==0.16.9         # 代码检查 + 格式化：python -m ruff check . / ruff format --check .
+pyright==1.1.414     # 类型检查（与 VS Code 的 Pylance 同源）：python -m pyright
+                     # 首次运行会经 nodeenv 下载 Node；离线环境可先设
+                     # $env:PYRIGHT_PYTHON_GLOBAL_NODE='1' 复用系统 Node

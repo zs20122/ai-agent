@@ -1,0 +1,39 @@
+# ============================================================
+# AI 研发助手 Agent —— 运行时依赖清单
+# 适用环境：Python >= 3.10（langchain 1.x / langgraph 1.x / langchain-openai 1.x 要求 >=3.10,<4.0）
+# 安装：python -m pip install -r requirements.txt
+# 版本于 2026-09-30 对齐 PyPI 最新稳定版；升级时请整体升级并回归测试。
+# 需要 --reload / WebSocket 支持时，把 uvicorn 换成 uvicorn[standard]
+# ============================================================
+
+# ---------- LLM 调用与 Agent 编排 ----------
+langchain==1.4.3            # LangChain 主包：Prompt / Tool / Agent 抽象
+langchain-openai==1.6.6     # OpenAI 兼容模型接入（ChatOpenAI、Embeddings）
+langgraph==1.2.12           # 有状态多节点 Agent 编排（StateGraph、checkpointer）
+
+# ---------- Web 服务 ----------
+fastapi==0.142.1            # HTTP API 框架（异步、自动 OpenAPI 文档）
+uvicorn==0.54.0             # ASGI 服务器，启动 fastapi 应用
+
+# ---------- 配置与数据校验 ----------
+python-dotenv==1.2.3        # 从 .env 读取密钥/配置到环境变量
+pydantic==2.13.5            # 请求/响应与配置的数据校验（v2 API）
+
+# ---------- Web 前端（Streamlit 聊天界面，见 frontend/app.py） ----------
+streamlit==1.64.0           # 中文气泡聊天界面（st.chat_input / st.chat_message）
+requests==2.34.2            # 前端调用后端 /api/v1/chat（上游已间接依赖，这里显式钉住，避免漂移）
+
+# ============================================================
+# 说明：以下包由上面的依赖自动安装，代码里直接 import，无需（也不应）在此重复钉版本，
+#      否则容易出现与上游约束冲突：
+#   langchain_core        -> 由 langchain / langgraph / langchain-openai 共同约束（>=1.4.7,<2.0.0）
+#                            项目直接使用：messages（AIMessage/HumanMessage/SystemMessage/ToolMessage）、tools（@tool/BaseTool）
+#   langgraph_checkpoint  -> 由 langgraph 提供，提供 langgraph.checkpoint.memory.InMemorySaver
+#   langgraph_prebuilt    -> 由 langgraph 提供（项目当前未使用，自研工具执行节点）
+#   openai / httpx / jsonpatch / requests-toolbelt -> 由 langchain-openai 提供
+#
+# 注意包名与 import 名的差异：langchain-openai 的 import 名是 langchain_openai。
+# 如需持久化会话记忆，请额外安装（并同步修改 app/memory/checkpointer.py）：
+#   langgraph-checkpoint-sqlite  或  langgraph-checkpoint-postgres
+# ============================================================
+
