@@ -2,7 +2,7 @@
 
 > 本文件中的每个数字与机制都对应仓库中的真实实现（见文末「材料与代码对应表」）。
 > 最后核对时间：2026-09-30 ｜ 质量门禁实测：
-> `ruff check .` → **All checks passed!** ｜ `ruff format --check .` → **43 files already formatted**
+> `ruff check .` → **All checks passed!** ｜ `ruff format --check .` → **全部文件已格式化（0 个待重排）**
 > ｜ `python -m pytest -q` → **34 passed** ｜ `python -m pyright`（standard）→ **0 errors / 0 warnings**
 
 ---
@@ -86,9 +86,10 @@ $env:PYRIGHT_PYTHON_GLOBAL_NODE='1'; .\.venv\Scripts\python.exe -m pyright
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-本次实测：`All checks passed!` ／ `43 files already formatted` ／ `0 errors, 0 warnings` ／ `34 passed`。
+本次实测：`All checks passed!` ／ 全部文件均已格式化（0 个待重排） ／ `0 errors, 0 warnings` ／ `34 passed`。
 
-> 关于 43 这个数字：项目的 `pyproject.toml` 未自定义 `include`，Ruff 的默认扫描范围除 Python 文件外还包含 Markdown 中的代码块
-> （40 个 `.py` + `README.md` / `PROJECT_SUMMARY.md` / `.pytest_cache/README.md` = 43）。
-> 本文件的代码块语言标记为 `powershell`，因此不会被当作 Python 代码参与格式化；若后续新增以 python 标注的代码块且未排版，`ruff format --check .` 会提示重排。
+> 关于 `ruff format` 的文件计数：`pyproject.toml` 未自定义 `include`，Ruff 的默认扫描范围除 Python 文件外还包含 Markdown 中的代码块，
+> 所以它统计的是「40 个 `.py` + 仓库内的 `.md`」。这个数字会随环境漂移（例如 `.pytest_cache/` 被 `.gitignore` 忽略后，
+> 其内部的 `README.md` 就不再计入，计数由 43 变 42）——**判断标准是「是否有文件需要重排」，应为 0**。
+> 本文件的代码块以 `powershell` 标注，不参与 Python 格式化。
 

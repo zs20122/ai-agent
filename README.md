@@ -1,8 +1,30 @@
 # AI 研发助手 Agent
 
-基于 **FastAPI + LangChain/LangGraph** 的 AI 研发助手服务骨架：HTTP 接口 → 业务编排 → LangGraph 工作流（规划 / 工具调用 / 收尾）→ 大模型与工具。
+基于 **FastAPI + LangGraph + Streamlit** 的 AI 研发助手服务骨架：HTTP 接口 → 业务编排 → LangGraph 工作流（规划 / 工具调用 / 收尾）→ 大模型与工具，并附带一个中文聊天前端。
+
+> **仓库地址（Gitee）**：<https://gitee.com/zhangsan220122/ai-agent>
+
+## 项目简介
+
+这是一个「能动手做事」的对话式研发助手：模型不只是聊天，而是通过 **Function Calling** 主动调用本机工具（列目录、读文件、按需执行白名单命令），把工具结果回填给模型后再产出回答；所有工具访问都被限制在固定工作目录内，构成一层可解释的沙盒。
+
+| 能力 | 说明 |
+| --- | --- |
+| Agent 工作流 | LangGraph `StateGraph` 编排 `planner → agent ⇄ tools → finalize`，条件边按最大步数收口，不会无限循环 |
+| 工具调用 | 用 `bind_tools` 绑定工具，自动解析 `tool_calls`、执行后按 `tool_call_id` 回填 `ToolMessage` |
+| 多轮记忆 | checkpointer 以 `thread_id = session_id` 保存上下文，同一会话可连续追问 |
+| 双形态接口 | 一次性返回 `POST /api/v1/chat` + SSE 逐字流式 `POST /api/v1/chat/stream` |
+| 沙盒安全 | 工具只能访问 `data/workspace`，拦截 `../` 路径穿越；命令行工具默认关闭且仅限白名单 |
+| 聊天前端 | Streamlit 中文气泡聊天页，可切换后端地址、查看连接状态与执行计划 |
+| 可测试性 | 34 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
+
+典型用法：问一句「data/workspace 里有哪些文件？」或「读一下 README.md 前 50 行」，Agent 会自己决定调用哪个工具、拿到结果后再回答。
 
 ## 技术栈
+
+**核心三件套：FastAPI（HTTP 接口）＋ LangGraph（Agent 工作流编排）＋ Streamlit（聊天前端）。**
+
+其余依赖如下：
 
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
@@ -67,6 +89,10 @@ ai-agent/
 ## 快速开始
 
 ```powershell
+# 0) 克隆仓库（已下载源码可跳过）
+git clone https://gitee.com/zhangsan220122/ai-agent.git
+cd ai-agent
+
 # 1) 创建虚拟环境（建议显式指定 3.10，避免命中 Microsoft Store 的 python 占位程序）
 py -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -97,6 +123,65 @@ python -m uvicorn app.main:app --reload
 
 > 内网/代理环境若直连 PyPI 超时，可改用镜像源，例如
 > `python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
+## 本地启动（两个终端）
+
+后端与前端是两个独立进程，**分别开两个终端**即可（前端依赖后端，请先起后端）：
+
+| 终端 | 进程 | 端口 | 地址 |
+| --- | --- | --- | --- |
+| 终端 1 | 后端 API（uvicorn + FastAPI） | 8000 | <http://127.0.0.1:8000> |
+| 终端 2 | 前端页面（Streamlit） | 8501 | <http://localhost:8501> |
+
+### 终端 1：启动后端（uvicorn）
+
+```powershell
+cd C:\path\to\ai-agent
+
+# 推荐：激活虚拟环境后用 python 启动
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --reload
+
+# 或者：不激活虚拟环境，直接指定解释器
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+看到下面两行说明后端已就绪：
+
+```text
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Application startup complete.
+```
+
+- 接口文档：<http://127.0.0.1:8000/docs>
+- 存活 / 就绪检查：<http://127.0.0.1:8000/api/v1/health>、<http://127.0.0.1:8000/api/v1/ready>
+- **这个终端不要关**：工具调用、规划、错误的日志都在这里输出，排查问题时最先看它。
+- 只想换端口：追加 `--port 8080`；不想热重载：去掉 `--reload`。
+
+### 终端 2：启动前端（Streamlit）
+
+**另开一个终端**，执行：
+
+```powershell
+cd C:\path\to\ai-agent
+.\.venv\Scripts\python.exe -m streamlit run frontend/app.py
+```
+
+浏览器会自动打开 <http://localhost:8501>；换端口用 `--server.port 8502`。
+
+- 侧边栏应显示「后端状态：已连接」；若显示「未连接」，说明终端 1 未启动或地址/端口不一致。
+- 在输入框问一句 **`data/workspace 里有哪些文件？`** 验证链路：助手气泡会给出回答，展开「执行计划」还能看到 `plan` / `steps` / 模型名。
+
+> `.env` 未填 `OPENAI_API_KEY` 时，两个服务都能正常启动，但对话会返回 **503**（`/api/v1/ready` 显示 `degraded`）——这是有意的降级设计，不是启动失败。
+
+### 一键启动（可选）
+
+不想开两个终端时，也可以先跑后端脚本，再手动起前端：
+
+```powershell
+# 终端 1：项目脚本（自动优先 .venv 解释器 + 端口占用预检 + 可选体检）
+powershell -ExecutionPolicy Bypass -File scripts\run_dev.ps1
+```
 
 ### 启动失败排查（Windows）
 
@@ -130,7 +215,7 @@ python -m uvicorn app.main:app --reload
 
 ## 聊天前端（Streamlit）
 
-不想用 Swagger 的话，可以直接开一个中文气泡聊天页面：
+不想用 Swagger 的话，可以直接开一个中文气泡聊天页面（**两终端的完整步骤见上文「本地启动（两个终端）」**）：
 
 ```powershell
 # 终端 A：先启动后端（默认 127.0.0.1:8000）
@@ -234,3 +319,9 @@ python -m pytest
 5. Windows 上 `python` 可能是 Microsoft Store 占位程序（表现为“无输出、直接退出”）：
    推荐用 `scripts\run_dev.ps1`（自动优先 `.venv` 解释器）或直接指定 `.\.venv\Scripts\python.exe`。
    详见「启动失败排查（Windows）」。
+
+---
+
+## 开发方式
+
+本项目采用 Cline + DeepSeek 作为主要开发方式。
