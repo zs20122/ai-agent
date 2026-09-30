@@ -1,5 +1,9 @@
 # AI 研发助手 Agent
 
+![运行截图](docs/demo.png)
+
+> 前端界面基于 Streamlit 实现，图中展示了 Agent 调用工具读取项目文件结构的能力。
+
 基于 **FastAPI + LangGraph + Streamlit** 的 AI 研发助手服务骨架：HTTP 接口 → 业务编排 → LangGraph 工作流（规划 / 工具调用 / 收尾）→ 大模型与工具，并附带一个中文聊天前端。
 
 > **仓库地址（Gitee）**：<https://gitee.com/zhangsan220122/ai-agent>
@@ -17,6 +21,10 @@
 | 沙盒安全 | 工具只能访问 `data/workspace`，拦截 `../` 路径穿越；命令行工具默认关闭且仅限白名单 |
 | 聊天前端 | Streamlit 中文气泡聊天页，可切换后端地址、查看连接状态与执行计划 |
 | 可测试性 | 34 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
+
+![运行截图](docs/demo.png)
+
+> 前端界面基于 Streamlit 实现，图中展示了 Agent 调用工具读取项目文件结构的能力。
 
 典型用法：问一句「data/workspace 里有哪些文件？」或「读一下 README.md 前 50 行」，Agent 会自己决定调用哪个工具、拿到结果后再回答。
 
