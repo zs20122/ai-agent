@@ -3,6 +3,8 @@
 # 适用环境：Python >= 3.10（langchain 1.x / langgraph 1.x / langchain-openai 1.x 要求 >=3.10,<4.0）
 # 安装：python -m pip install -r requirements.txt
 # 版本于 2026-09-30 对齐 PyPI 最新稳定版；升级时请整体升级并回归测试。
+# 2026-10-01：新增 RAG 三项依赖（langchain-community / faiss-cpu / sentence-transformers）；
+#             版本由 pip 解析锁定后钉住，安装前已用 pip install --dry-run 确认不会改动上面的 langchain/langgraph。
 # 需要 --reload / WebSocket 支持时，把 uvicorn 换成 uvicorn[standard]
 # ============================================================
 
@@ -23,6 +25,11 @@ pydantic==2.13.5            # 请求/响应与配置的数据校验（v2 API）
 streamlit==1.64.0           # 中文气泡聊天界面（st.chat_input / st.chat_message）
 requests==2.34.2            # 前端调用后端 /api/v1/chat（上游已间接依赖，这里显式钉住，避免漂移）
 
+# ---------- RAG（检索增强：本地向量化 + 向量检索） ----------
+langchain-community==0.4.2      # 文档加载 / 文本切分 / 向量库适配（FAISS 等）的统一入口
+faiss-cpu==1.15.1               # 本地向量索引（CPU 版，无需 GPU；Windows 提供 cp310 轮子）
+sentence-transformers==6.1.0    # 本地 Embedding 模型（把文本转成向量，无需调用云端接口）
+
 # ============================================================
 # 说明：以下包由上面的依赖自动安装，代码里直接 import，无需（也不应）在此重复钉版本，
 #      否则容易出现与上游约束冲突：
@@ -31,6 +38,11 @@ requests==2.34.2            # 前端调用后端 /api/v1/chat（上游已间接�
 #   langgraph_checkpoint  -> 由 langgraph 提供，提供 langgraph.checkpoint.memory.InMemorySaver
 #   langgraph_prebuilt    -> 由 langgraph 提供（项目当前未使用，自研工具执行节点）
 #   openai / httpx / jsonpatch / requests-toolbelt -> 由 langchain-openai 提供
+#   langchain-classic / langchain-text-splitters / pydantic-settings / SQLAlchemy / aiohttp
+#                             -> 由 langchain-community 提供（文档切分、向量库适配都在其中）
+#   torch / transformers / huggingface-hub / tokenizers / scikit-learn / scipy
+#                             -> 由 sentence-transformers 提供，是本次新增里体积最大的一项（CPU 版 torch）；
+#                                首次实际使用时还会联网下载 Embedding 模型权重，离线环境请提前缓存或指定本地模型目录
 #
 # 注意包名与 import 名的差异：langchain-openai 的 import 名是 langchain_openai。
 # 如需持久化会话记忆，请额外安装（并同步修改 app/memory/checkpointer.py）：
