@@ -17,11 +17,11 @@
 | Agent 工作流 | LangGraph `StateGraph` 编排 `planner → agent ⇄ tools → finalize`，条件边按最大步数收口，不会无限循环 |
 | 工具调用 | 用 `bind_tools` 绑定工具，自动解析 `tool_calls`、执行后按 `tool_call_id` 回填 `ToolMessage` |
 | 知识库检索（RAG） | 项目文档切分 → 本地 Embedding 向量化 → FAISS 语义检索；文档类问题先检索片段再作答，索引按文件指纹自动重建 |
-| 多轮记忆 | checkpointer 以 `thread_id = session_id` 保存上下文，同一会话可连续追问 |
+| 多轮记忆 | checkpointer 以 `thread_id = session_id` 保存上下文，同一会话可连续追问；`CHECKPOINT_BACKEND=sqlite` 时历史落盘到 `data/checkpoints.db`，进程重启后仍可续聊 |
 | 双形态接口 | 一次性返回 `POST /api/v1/chat` + SSE 逐字流式 `POST /api/v1/chat/stream` |
 | 沙盒安全 | 工具只能访问 `data/workspace`，拦截 `../` 路径穿越；命令行工具默认关闭且仅限白名单 |
 | 聊天前端 | Streamlit 中文气泡聊天页，可切换后端地址、查看连接状态与执行计划 |
-| 可测试性 | 41 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
+| 可测试性 | 48 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
 
 典型用法：问一句「data/workspace 里有哪些文件？」或「读一下 README.md 前 50 行」，Agent 会自己决定调用哪个工具、拿到结果后再回答；问文档类问题（如「这个项目怎么启动？」）时会先走**知识库语义检索**，而不是把整篇 README 读进来。
 
@@ -36,6 +36,7 @@
 | langchain | 1.4.3 | LLM 应用框架 |
 | langchain-openai | 1.6.6 | OpenAI 兼容模型接入 |
 | langgraph | 1.2.12 | Agent 工作流编排（含 checkpointer） |
+| langgraph-checkpoint-sqlite | 3.1.1 | 会话记忆持久化（`AsyncSqliteSaver`，写入 SQLite 文件） |
 | langchain-community | 0.4.2 | 文本切分 + FAISS 向量库适配（RAG 检索用） |
 | faiss-cpu | 1.15.1 | 本地向量索引（CPU 版，无需 GPU） |
 | sentence-transformers | 6.1.0 | 本地 Embedding 模型（离线把文本转成向量） |
@@ -77,7 +78,7 @@ ai-agent/
 │   │       ├── shell.py        # 白名单命令，默认关闭
 │   │       └── knowledge.py    # 知识库语义检索（RAG：本地 Embedding + FAISS）
 │   ├── llm/factory.py          # ChatOpenAI 工厂（唯一模型实例化入口）
-│   ├── memory/checkpointer.py  # 会话记忆（默认内存）
+│   ├── memory/checkpointer.py  # 会话记忆（内存 / SQLite 持久化）
 │   ├── schemas/chat.py         # 请求/响应模型
 │   └── services/agent_service.py  # 业务编排：chat / stream
 ├── frontend/
@@ -87,7 +88,9 @@ ai-agent/
 │   ├── check_env.py            # 依赖体检（仅标准库，供 run_dev.ps1 调用）
 │   └── run_dev.ps1             # Windows 一键启动（自动选解释器 + 端口预检 + -Diagnose 体检）
 ├── tests/                      # pytest 用例（离线，不访问网络）
-├── data/workspace/             # 工具可访问的工作目录（运行时创建）
+├── data/
+│   ├── workspace/              # 工具可访问的工作目录（运行时创建）
+│   └── checkpoints.db          # 会话记忆库（CHECKPOINT_BACKEND=sqlite 时运行时创建，已在 .gitignore 中）
 ├── requirements.txt / requirements-dev.txt
 ├── .env.example
 └── pyproject.toml              # pytest / ruff / pyright 配置
@@ -338,6 +341,21 @@ INFO  app.agents.tools.knowledge  | search_knowledge_base 命中 4 段：query='
 - 想跳过模型单独验证检索本身：`.\.venv\Scripts\python.exe scripts\cli.py "这个项目怎么启动"`，
   或只跑该工具的离线用例 `.\.venv\Scripts\python.exe -m pytest tests\test_knowledge_tool.py -q`。
 
+## 会话记忆（多轮记忆持久化）
+
+会话记忆由 `CHECKPOINT_BACKEND` 决定，配置见 `.env.example`：
+
+| 变量 | `.env.example` 取值 | 说明 |
+| --- | --- | --- |
+| `CHECKPOINT_BACKEND` | `sqlite` | `sqlite`：`AsyncSqliteSaver` 把历史落盘；`memory`：进程内 `InMemorySaver`（**代码默认值**，重启即丢失） |
+| `SQLITE_DB_PATH` | `data/checkpoints.db` | SQLite 会话库路径（相对路径按项目根目录解析），**上级目录不存在会自动创建** |
+
+- 同一 `session_id`（即 LangGraph 的 `thread_id`）在进程重启后仍可续聊；库里是 `checkpoints` / `writes` 两张表，可用任意 SQLite 客户端直接查看。
+- 应用停止时 `lifespan` 会关闭数据库连接（`aiosqlite` 的工作线程不是守护线程，不关闭会拖住进程退出）。
+- 可选依赖缺失（没装 `langgraph-checkpoint-sqlite`）或在事件循环外构建图时，会**记录警告并回退到内存实现**，服务不会因此起不来，只是本轮会话不落盘。
+- 多副本部署共享同一份 SQLite 文件不是目标场景；需要集中式存储时改 `app/memory/checkpointer.py` 接 Postgres 等实现。
+- 想清空历史：停服后删除 `data/checkpoints.db`（连同同目录的 `-wal` / `-shm` 文件）即可。
+
 ## 扩展点
 
 | 需求 | 改动位置 |
@@ -346,7 +364,7 @@ INFO  app.agents.tools.knowledge  | search_knowledge_base 命中 4 段：query='
 | 调整知识库 / 检索参数 | 改 `.env` 的 `ENABLE_RAG_TOOL` / `EMBEDDING_MODEL` / `KNOWLEDGE_*`；实现见 `app/agents/tools/knowledge.py` |
 | 改提示词（含「文档类问题先检索」硬性规定） | `app/agents/nodes.py` 的 `DEFAULT_SYSTEM_PROMPT`、`PLANNER_PROMPT` |
 | 换模型/网关 | 改 `.env`（`OPENAI_MODEL` / `OPENAI_BASE_URL`），或在 `app/llm/factory.py` 调整参数 |
-| 换会话存储 | 改 `app/memory/checkpointer.py`（如 `SqliteSaver` / `PostgresSaver`，需额外安装对应包） |
+| 换会话存储 | 改 `.env` 的 `CHECKPOINT_BACKEND`（`memory` / `sqlite`）与 `SQLITE_DB_PATH`；接 Postgres 等其它后端改 `app/memory/checkpointer.py` 并安装对应包 |
 | 调整节点/流程 | `app/agents/nodes.py`、`app/agents/graph.py` |
 | 新增接口 | 在 `app/api/v1/endpoints/` 加路由并注册到 `router.py` |
 
@@ -365,6 +383,7 @@ python -m pytest
 - `tests/test_agent_service.py`：结果映射与 SSE 事件序列
 - `tests/test_frontend.py`：前端的请求构造、响应解析与错误语义（monkeypatch 掉 `requests`）
 - `tests/test_knowledge_tool.py`：知识库检索的相关性排序与 top_k 限制、空库降级为可读错误、文档变更后索引自动重建、`ENABLE_RAG_TOOL` 开关、系统提示词硬性规定回归、图端到端执行检索工具（用假 Embedding，不下载模型）
+- `tests/test_checkpointer.py`：会话记忆后端选择、SQLite 落盘后重建仍能读回历史（含端到端 `AgentService` 会话恢复）、库文件目录自动创建、依赖缺失 / 无事件循环时的降级回退
 
 ## 代码质量（静态检查）
 
@@ -387,7 +406,7 @@ python -m pytest
 ## 注意事项与已知限制
 
 1. 未配置 `OPENAI_API_KEY` 时服务仍可启动，`/api/v1/chat` 返回 **503**，`/api/v1/ready` 返回 `degraded`。
-2. 默认 checkpointer 为**进程内内存**，重启即丢失、多副本不共享；生产请替换为持久化实现。
+2. 会话记忆由 `CHECKPOINT_BACKEND` 决定：`memory`（进程内，重启即丢失）或 `sqlite`（落盘到 `SQLITE_DB_PATH`，默认 `data/checkpoints.db`，目录自动创建，单机重启后可续聊）；多副本共享仍建议换用 Postgres 等集中式存储。
 3. `read_project_file` / `list_project_files` 只能访问 `WORKSPACE_DIR`（默认 `data/workspace`）内部。
 4. `run_whitelisted_command` 默认关闭；即便开启，也只允许 `python / pytest / ruff / mypy / git` 且禁用 shell 元字符、强制超时。
 5. `search_knowledge_base` **只做只读检索**（不写任何磁盘文件）；索引对象缓存在进程内，应用重启后首次提问会重建；Embedding 模型首次使用时才加载，离线环境请提前缓存权重或用 `EMBEDDING_MODEL` 指向本地模型目录。

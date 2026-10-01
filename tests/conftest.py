@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -16,13 +17,18 @@ import pytest  # noqa: E402
 
 from app.core.config import reset_settings_cache  # noqa: E402
 from app.llm.factory import reset_chat_model_cache  # noqa: E402
-from app.memory.checkpointer import reset_checkpointer_cache  # noqa: E402
+from app.memory.checkpointer import (  # noqa: E402
+    aclose_checkpointers,
+    reset_checkpointer_cache,
+)
 
 
 def _reset_all() -> None:
     reset_settings_cache()
     reset_chat_model_cache()
     reset_checkpointer_cache()
+    # SQLite checkpointer 的连接要在事件循环里关闭（aiosqlite 的工作线程不是守护线程）
+    asyncio.run(aclose_checkpointers())
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +37,13 @@ def clean_caches() -> Iterator[None]:
     _reset_all()
     yield
     _reset_all()
+
+
+@pytest.fixture(autouse=True)
+def isolated_sqlite_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """把会话记忆的 SQLite 库指到临时目录，避免测试写脏真实的 data/checkpoints.db。"""
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "checkpoints.db"))
+    reset_settings_cache()
 
 
 @pytest.fixture

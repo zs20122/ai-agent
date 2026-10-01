@@ -49,6 +49,14 @@ def _as_list(raw: str | None, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _as_path(raw: str | None, default: Path) -> Path:
+    """路径配置：支持 ~ 展开；相对路径按项目根目录解析，避免落到启动时的工作目录。"""
+    if raw is None or raw.strip() == "":
+        return default
+    path = Path(raw.strip()).expanduser()
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 # 默认 Embedding 模型：中文小模型，CPU 即可运行（约 95 MB）
 DEFAULT_EMBEDDING_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 # 本机预置的模型缓存目录（huggingface.co 不可达时，可直接用魔搭等渠道下载到这里，离线可用）
@@ -98,6 +106,7 @@ class Settings(BaseModel):
 
     # 记忆
     checkpoint_backend: str = "memory"
+    sqlite_db_path: Path = PROJECT_ROOT / "data" / "checkpoints.db"
 
     @property
     def model_configured(self) -> bool:
@@ -136,6 +145,9 @@ def _build_settings() -> Settings:
         knowledge_top_k=_as_int(os.getenv("KNOWLEDGE_TOP_K"), 4),
         knowledge_max_chars=_as_int(os.getenv("KNOWLEDGE_MAX_CHARS"), 1200),
         checkpoint_backend=os.getenv("CHECKPOINT_BACKEND", "memory").strip().lower() or "memory",
+        sqlite_db_path=_as_path(
+            os.getenv("SQLITE_DB_PATH"), PROJECT_ROOT / "data" / "checkpoints.db"
+        ),
     )
 
 

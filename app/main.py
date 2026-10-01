@@ -20,6 +20,7 @@ from app import __version__
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger, setup_logging
+from app.memory.checkpointer import aclose_checkpointers
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     yield
+
+    # 关闭 SQLite 会话记忆连接：aiosqlite 的工作线程不是守护线程，不关会拖住进程退出
+    await aclose_checkpointers()
 
     logger.info("应用已停止")
 
