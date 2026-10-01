@@ -5,6 +5,7 @@ from __future__ import annotations
 from langchain_core.tools import BaseTool
 
 from app.agents.tools.file_ops import FILE_TOOLS
+from app.agents.tools.knowledge import search_knowledge_base
 from app.agents.tools.shell import build_shell_tool
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
@@ -17,6 +18,9 @@ def get_tools(settings: Settings | None = None) -> list[BaseTool]:
     settings = settings or get_settings()
 
     tools: list[BaseTool] = list(FILE_TOOLS)
+
+    if settings.enable_rag_tool:
+        tools.append(search_knowledge_base)
 
     if settings.enable_shell_tool:
         tools.append(build_shell_tool())

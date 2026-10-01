@@ -49,6 +49,19 @@ def _as_list(raw: str | None, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+# 默认 Embedding 模型：中文小模型，CPU 即可运行（约 95 MB）
+DEFAULT_EMBEDDING_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+# 本机预置的模型缓存目录（huggingface.co 不可达时，可直接用魔搭等渠道下载到这里，离线可用）
+LOCAL_MODEL_DIR = Path.home() / ".cache" / "ai-agent" / "models" / "bge-small-zh-v1.5"
+
+
+def _default_embedding_model() -> str:
+    """默认 Embedding 模型：本地缓存目录存在时优先用本地路径（从而完全离线）。"""
+    if (LOCAL_MODEL_DIR / "config.json").is_file():
+        return str(LOCAL_MODEL_DIR)
+    return DEFAULT_EMBEDDING_MODEL_NAME
+
+
 class Settings(BaseModel):
     """运行期配置（不可变语义：修改请改 .env 后重启）。"""
 
@@ -73,6 +86,15 @@ class Settings(BaseModel):
     # 工具
     workspace_dir: Path = PROJECT_ROOT / "data" / "workspace"
     enable_shell_tool: bool = False
+
+    # 工具 - 知识库检索（RAG）
+    enable_rag_tool: bool = True
+    embedding_model: str = _default_embedding_model()
+    knowledge_dirs: list[str] = ["."]
+    knowledge_chunk_size: int = 500
+    knowledge_chunk_overlap: int = 80
+    knowledge_top_k: int = 4
+    knowledge_max_chars: int = 1200
 
     # 记忆
     checkpoint_backend: str = "memory"
@@ -106,6 +128,13 @@ def _build_settings() -> Settings:
             os.getenv("WORKSPACE_DIR", str(PROJECT_ROOT / "data" / "workspace"))
         ).expanduser(),
         enable_shell_tool=_as_bool(os.getenv("ENABLE_SHELL_TOOL"), False),
+        enable_rag_tool=_as_bool(os.getenv("ENABLE_RAG_TOOL"), True),
+        embedding_model=(os.getenv("EMBEDDING_MODEL") or "").strip() or _default_embedding_model(),
+        knowledge_dirs=_as_list(os.getenv("KNOWLEDGE_DIRS"), ["."]),
+        knowledge_chunk_size=_as_int(os.getenv("KNOWLEDGE_CHUNK_SIZE"), 500),
+        knowledge_chunk_overlap=_as_int(os.getenv("KNOWLEDGE_CHUNK_OVERLAP"), 80),
+        knowledge_top_k=_as_int(os.getenv("KNOWLEDGE_TOP_K"), 4),
+        knowledge_max_chars=_as_int(os.getenv("KNOWLEDGE_MAX_CHARS"), 1200),
         checkpoint_backend=os.getenv("CHECKPOINT_BACKEND", "memory").strip().lower() or "memory",
     )
 

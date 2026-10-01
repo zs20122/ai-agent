@@ -81,7 +81,11 @@ def test_shell_tool_rejects_non_whitelisted(workspace: Path, monkeypatch: Any) -
 
 
 def test_registry_respects_shell_flag(workspace: Path, monkeypatch: Any) -> None:
-    assert {tool.name for tool in get_tools()} == {"list_project_files", "read_project_file"}
+    assert {tool.name for tool in get_tools()} == {
+        "list_project_files",
+        "read_project_file",
+        "search_knowledge_base",
+    }
 
     monkeypatch.setenv("ENABLE_SHELL_TOOL", "true")
     reset_settings_cache()
