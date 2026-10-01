@@ -17,11 +17,11 @@
 | Agent 工作流 | LangGraph `StateGraph` 编排 `planner → agent ⇄ tools → finalize`，条件边按最大步数收口，不会无限循环 |
 | 工具调用 | 用 `bind_tools` 绑定工具，自动解析 `tool_calls`、执行后按 `tool_call_id` 回填 `ToolMessage` |
 | 知识库检索（RAG） | 项目文档切分 → 本地 Embedding 向量化 → FAISS 语义检索；文档类问题先检索片段再作答，索引按文件指纹自动重建 |
-| 多轮记忆 | checkpointer 以 `thread_id = session_id` 保存上下文，同一会话可连续追问；`CHECKPOINT_BACKEND=sqlite` 时历史落盘到 `data/checkpoints.db`，进程重启后仍可续聊 |
+| 多轮记忆 | checkpointer 以 `thread_id = session_id` 保存上下文，同一会话可连续追问；`CHECKPOINT_BACKEND=sqlite` 时历史落盘到 `data/checkpoints.db`，进程重启后仍可续聊；`GET /api/v1/chat/history/{session_id}` 可按会话读回历史消息（**默认只返回用户的提问与 AI 的最终回答**，系统提示词 / 工具结果 / 中间步骤会被过滤） |
 | 双形态接口 | 一次性返回 `POST /api/v1/chat` + SSE 逐字流式 `POST /api/v1/chat/stream` |
 | 沙盒安全 | 工具只能访问 `data/workspace`，拦截 `../` 路径穿越；命令行工具默认关闭且仅限白名单 |
-| 聊天前端 | Streamlit 中文气泡聊天页，可切换后端地址、查看连接状态与执行计划 |
-| 可测试性 | 48 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
+| 聊天前端 | Streamlit 中文气泡聊天页，可切换后端地址、查看连接状态与执行计划；会话 ID 写进地址栏 `?session_id=`，**刷新页面自动恢复会话与历史气泡**；气泡**只画用户的提问与 AI 的最终回答**（工具调用、检索片段、agent 草稿等内部过程在前后端都会被过滤，不会渲染成气泡），纯 HTML 正文改成代码块显示；侧边栏显示「对话条数 / 被过滤的内部条数 → 渲染气泡数」诊断 |
+| 可测试性 | 84 个离线 pytest 用例（假模型驱动，不需要 API Key、不访问网络） |
 
 典型用法：问一句「data/workspace 里有哪些文件？」或「读一下 README.md 前 50 行」，Agent 会自己决定调用哪个工具、拿到结果后再回答；问文档类问题（如「这个项目怎么启动？」）时会先走**知识库语义检索**，而不是把整篇 README 读进来。
 
@@ -82,7 +82,7 @@ ai-agent/
 │   ├── schemas/chat.py         # 请求/响应模型
 │   └── services/agent_service.py  # 业务编排：chat / stream
 ├── frontend/
-│   └── app.py                  # Streamlit 聊天界面（调用 /api/v1/chat）
+│   └── app.py                  # Streamlit 聊天界面（对话 + URL 会话自动恢复历史）
 ├── scripts/
 │   ├── cli.py                  # 命令行调试
 │   ├── check_env.py            # 依赖体检（仅标准库，供 run_dev.ps1 调用）
@@ -239,7 +239,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run_dev.ps1
 
 - 页面顶部标题「AI 研发助手」，用 `st.chat_input` + `st.chat_message` 实现气泡聊天；
 - 提交后前端请求 `POST /api/v1/chat`，把响应中的 `answer` 渲染到助手气泡；
-- 侧边栏可修改后端地址、查看后端状态（读 `/api/v1/ready`）、点「开始新会话」更换 `session_id`（决定多轮记忆分组）；
+- **会话与历史全自动**：页面每次加载都固定按「读 URL 查询参数 → 拿到 `session_id`（没有就新生成并写回 `?session_id=xxx`）→ 拉取历史 → 渲染页面」执行，所以按 F5 刷新、收藏或分享链接都会自动调用 `GET /api/v1/chat/history/{session_id}` 把后端保存的历史渲染回气泡，**不需要任何手动操作**；
+- 侧边栏只保留「后端地址 + `/ready` 状态」与「开始新会话」按钮（换一个 `session_id`，决定多轮记忆分组，同时更新地址栏），没有历史会话 ID 输入框之类的手动控件；
+- 历史气泡**只画「用户的提问」与「AI 的最终回答」**：后端历史接口默认就把 SystemMessage（系统提示词）、ToolMessage（工具结果）与带 `tool_calls` 的中间步骤过滤掉，前端再按轮次只保留最后一条回答，因此工具调用过程、检索片段、agent 草稿都不会出现在聊天区；同一个会话只拉一次历史，对话过程中的页面重跑不会覆盖已有气泡，读历史失败只在侧边栏提示、不打断页面；
 - 助手气泡可展开「执行计划」，查看 `plan` / `steps` / 模型名；
 - 前端在 Streamlit 进程里用 `requests` 调用后端，属于服务端请求，不依赖后端 CORS 配置；
 - 换端口启动前端：`.\.venv\Scripts\python.exe -m streamlit run frontend/app.py --server.port 8502`
@@ -251,6 +253,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_dev.ps1
 | --- | --- | --- |
 | POST | `/api/v1/chat` | 执行一轮 Agent 对话，返回完整回答 |
 | POST | `/api/v1/chat/stream` | SSE 流式返回：`start` / `progress` / `token` / `end` / `error` |
+| GET | `/api/v1/chat/history/{session_id}` | 从 checkpointer 读取该会话的历史消息（`?limit=` 取最近 N 条，默认 200、上限 500；**默认只返回提问与最终回答**，`?include_internal=true` 可连内部过程一起返回，用于排查） |
 | GET | `/api/v1/health` | 存活检查 |
 | GET | `/api/v1/ready` | 就绪检查（校验模型凭据是否配置） |
 | GET | `/` | 服务信息 |
@@ -260,6 +263,12 @@ powershell -ExecutionPolicy Bypass -File scripts\run_dev.ps1
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/chat `
   -ContentType "application/json" `
   -Body '{"message":"帮我看看项目里有哪些文件","session_id":"demo"}'
+
+# 读取该会话的历史（checkpointer 里的落盘历史，会话不存在时返回空列表）
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/chat/history/demo?limit=20"
+
+# 排查用：连系统提示词 / 工具调用过程一起返回（默认不返回这些内部消息）
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/chat/history/demo?include_internal=true"
 ```
 
 ## 工作流
@@ -351,6 +360,7 @@ INFO  app.agents.tools.knowledge  | search_knowledge_base 命中 4 段：query='
 | `SQLITE_DB_PATH` | `data/checkpoints.db` | SQLite 会话库路径（相对路径按项目根目录解析），**上级目录不存在会自动创建** |
 
 - 同一 `session_id`（即 LangGraph 的 `thread_id`）在进程重启后仍可续聊；库里是 `checkpoints` / `writes` 两张表，可用任意 SQLite 客户端直接查看。
+- 想在前端或脚本里读回历史：`GET /api/v1/chat/history/{session_id}?limit=20`（消息按时间正序，只依赖会话存储，**没配 API Key 也能读**；会话不存在时返回 `200` + 空列表）。**默认只返回 HumanMessage 与 AIMessage**（用户的提问 + AI 的最终回答）：SystemMessage（系统提示词）、ToolMessage（工具结果）、带 `tool_calls` 的中间步骤以及同一轮里的草稿都会被过滤，`filtered_messages` 字段说明过滤掉了几条；想看完整过程加 `?include_internal=true`。
 - 应用停止时 `lifespan` 会关闭数据库连接（`aiosqlite` 的工作线程不是守护线程，不关闭会拖住进程退出）。
 - 可选依赖缺失（没装 `langgraph-checkpoint-sqlite`）或在事件循环外构建图时，会**记录警告并回退到内存实现**，服务不会因此起不来，只是本轮会话不落盘。
 - 多副本部署共享同一份 SQLite 文件不是目标场景；需要集中式存储时改 `app/memory/checkpointer.py` 接 Postgres 等实现。
@@ -381,7 +391,8 @@ python -m pytest
 - `tests/test_graph.py`：工具调用闭环、步数上限、多轮记忆
 - `tests/test_tools.py`：路径越界防护、读取截断、命令白名单
 - `tests/test_agent_service.py`：结果映射与 SSE 事件序列
-- `tests/test_frontend.py`：前端的请求构造、响应解析与错误语义（monkeypatch 掉 `requests`）
+- `tests/test_frontend.py`：前端的请求构造、响应解析与错误语义（monkeypatch 掉 `requests`），含会话历史转气泡的契约（**只画用户提问与 AI 最终回答**：同一轮的多条 assistant 只留最终回答、系统提示词 / 工具过程 / agent 草稿都不渲染；真实后端那种 7 条原始形状也只画两个问答气泡；只有工具过程没有问答时一个气泡都不画；没有文字回答的轮次不拿工具过程凑数，空正文用提示语兜底；角色 `human`/`ai` 与 `type` 字段都能识别）、`_looks_like_html_only`（纯 HTML 正文会被 Markdown 过滤成空白），以及用 `AppTest` 离线驱动整个页面脚本的「URL 会话 ID 自动恢复历史 / 无 URL 时新生成并写回地址栏 / 非法 URL 兜底 / **载入后逐条画气泡且每次重跑都重画** / **过滤后的历史只画问答气泡且侧边栏说明过滤条数** / **拿到未过滤的原始历史也只画问答气泡** / **气泡被清空时自愈重拉** / **仅 HTML 的历史不空白、改成代码块显示** / **只有内部过程时侧边栏给 warning** / 重跑不重复拉历史 / 侧边栏已无手动历史控件 / 后端故障不打断页面」用例
+- `tests/test_history.py`：会话历史接口的默认过滤（**只返回 HumanMessage 与 AIMessage**：系统提示词 / 工具结果 / 中间步骤 / 重复草稿都被丢弃并计入 `filtered_messages`、同一轮只留最终回答）、`include_internal=true` 的完整过程视图、`limit` 截断，以及 SQLite 落盘历史经 HTTP 读回（含无 API Key 时仍可读）
 - `tests/test_knowledge_tool.py`：知识库检索的相关性排序与 top_k 限制、空库降级为可读错误、文档变更后索引自动重建、`ENABLE_RAG_TOOL` 开关、系统提示词硬性规定回归、图端到端执行检索工具（用假 Embedding，不下载模型）
 - `tests/test_checkpointer.py`：会话记忆后端选择、SQLite 落盘后重建仍能读回历史（含端到端 `AgentService` 会话恢复）、库文件目录自动创建、依赖缺失 / 无事件循环时的降级回退
 
@@ -420,3 +431,9 @@ python -m pytest
 ## 开发方式
 
 本项目采用 Cline + DeepSeek 作为主要开发方式。
+
+---
+
+## 已知限制（补充）
+
+前端 Streamlit 刷新页面时的历史记录渲染仍在优化中，后端 SQLite 持久化与 API 读取已完美支持。

@@ -8,6 +8,13 @@ from pydantic import BaseModel, Field
 
 DEFAULT_SESSION_ID = "default"
 
+# 会话历史接口：默认只返回最近 100 条，单次最多 500 条（避免一次拉出整段超长会话）
+DEFAULT_HISTORY_LIMIT = 100
+MAX_HISTORY_LIMIT = 500
+
+# 前端习惯的角色名（LangChain 的 human / ai / system / tool 已在此归一化）
+MessageRole = Literal["system", "user", "assistant", "tool"]
+
 
 class ChatRequest(BaseModel):
     """一次对话请求。"""
@@ -51,3 +58,45 @@ class StreamChunk(BaseModel):
     node: str = ""
     delta: str = ""
     answer: str | None = None
+
+
+class ChatHistoryMessage(BaseModel):
+    """会话历史里的一条消息（角色已归一化成前端习惯的写法）。"""
+
+    role: MessageRole = Field(..., description="system / user / assistant / tool")
+    content: str = Field(default="", description="消息正文（内容块已转成纯文本）")
+    name: str = Field(default="", description="工具消息的工具名，其它角色为空")
+    tool_calls: list[str] = Field(
+        default_factory=list,
+        description="该条 assistant 消息请求调用的工具名（仅 include_internal=true 时可能非空）",
+    )
+
+
+class ChatHistoryResponse(BaseModel):
+    """会话历史响应（GET /api/v1/chat/history/{session_id}）。
+
+    默认只返回 HumanMessage 与 AIMessage（用户的提问 + AI 的最终回答）：
+    系统提示词、工具返回、中间工具调用步骤都在后端就被过滤，不进入 ``messages``。
+    """
+
+    session_id: str = Field(..., description="会话 ID，即 checkpointer 的 thread_id")
+    backend: str = Field(
+        default="memory",
+        description="实际提供历史的后端：sqlite（落盘）/ memory（进程内，依赖缺失时降级）",
+    )
+    total_messages: int = Field(
+        default=0, description="当前视图下的消息总条数（默认视图 = 提问 + 最终回答）"
+    )
+    message_count: int = Field(default=0, description="本次实际返回的消息条数")
+    filtered_messages: int = Field(
+        default=0,
+        description="被过滤掉的内部消息条数（系统提示词 / 工具返回 / 中间步骤 / 草稿）",
+    )
+    include_internal: bool = Field(
+        default=False, description="本次返回的是否为完整过程视图（含 system / tool / 中间步骤）"
+    )
+    truncated: bool = Field(default=False, description="是否因为 limit 截断了更早的历史")
+    messages: list[ChatHistoryMessage] = Field(
+        default_factory=list,
+        description="按时间正序（由旧到新）排列的消息；会话不存在时为空列表",
+    )

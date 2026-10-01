@@ -24,6 +24,9 @@ htmlcov/
 # ---------- 运行期数据 ----------
 data/*
 !data/.gitkeep
+# SQLite 会话记忆文件及其 WAL / SHM 副文件（运行期生成，不入库）
+data/checkpoints.db
+data/checkpoints.db-*
 
 # ---------- IDE / OS ----------
 .idea/
